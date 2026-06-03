@@ -1,0 +1,2 @@
+# ai-it-stack-lab
+STACK OPERATIVO OTTIMIZZATO 
