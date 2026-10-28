@@ -1,6 +1,7 @@
 import ast
 import inspect
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -93,7 +94,8 @@ def test_training_history_output_configuration_and_validation():
     try:
         assert isinstance(fig, plotting.Figure) and isinstance(ax, plotting.Axes)
         assert ax.get_title() == "Training" and ax.get_xlabel() == "Epoch" and ax.get_ylabel() == "Loss (MSE)"
-        assert len(ax.lines) == 2 and ax.get_legend() is not None and not ax.xaxis._major_tick_kw["gridOn"]
+        assert len(ax.lines) == 2 and ax.get_legend() is not None
+        assert not any(line.get_visible() for line in ax.get_xgridlines())
         assert original == {"loss": [3.0, 2.0], "val_loss": [4.0, 3.0]}
     finally:
         _close(fig)
@@ -177,14 +179,19 @@ def test_error_distribution_histogram_kde_zero_and_validation():
         assert [text.get_text() for text in kde_ax.get_legend().get_texts()] == ["Zero error"]
     finally:
         _close(kde_fig)
-    constant_fig, constant_ax = plotting.plot_error_distribution([2.0, 2.0, 2.0], target_name="load", bins=3, kde=True)
-    try:
-        assert len(constant_ax.patches) == 3
-        assert len(constant_ax.lines) == 1
-        assert constant_ax.lines[0].get_xdata()[0] == 0
-        assert [text.get_text() for text in constant_ax.get_legend().get_texts()] == ["Zero error"]
-    finally:
-        _close(constant_fig)
+    with patch.object(plotting.sns, "histplot", wraps=plotting.sns.histplot) as histplot_spy:
+        constant_fig, constant_ax = plotting.plot_error_distribution(
+            [2.0, 2.0, 2.0], target_name="load", bins=3, kde=True
+        )
+        try:
+            histplot_spy.assert_called_once()
+            assert not histplot_spy.call_args.kwargs["kde"]
+            assert len(constant_ax.patches) == 3
+            assert len(constant_ax.lines) == 1
+            assert constant_ax.lines[0].get_xdata()[0] == 0
+            assert [text.get_text() for text in constant_ax.get_legend().get_texts()] == ["Zero error"]
+        finally:
+            _close(constant_fig)
     for errors, error in [([], ValueError), (["x"], TypeError), ([np.nan], ValueError), ([np.inf], ValueError)]:
         with pytest.raises(error):
             plotting.plot_error_distribution(errors, target_name="load")
