@@ -40,6 +40,15 @@ def test_balance_rejects_different_series_indexes():
         calculate_energy_balance(left, right)
 
 
+def test_balance_preserves_negative_inputs_without_clipping():
+    result = calculate_energy_balance([-2.0, 4.0], [1.0, -3.0])
+    assert result.consumption == (-2.0, 4.0)
+    assert result.production == (1.0, -3.0)
+    assert result.net_balance == (3.0, -7.0)
+    assert result.grid_export == (3.0, 0.0)
+    assert result.grid_import == (0.0, 7.0)
+
+
 def test_kpis_and_cumulative_flows_match_balance_and_validate_fields():
     result = calculate_energy_balance([5., 3., 2., 4.], [2., 3., 6., 1.])
     kpis = calculate_energy_balance_kpis(result)
@@ -53,7 +62,20 @@ def test_kpis_and_cumulative_flows_match_balance_and_validate_fields():
         calculate_cumulative_grid_flows({"net_balance": [0], "grid_import": [np.nan], "grid_export": [0]})
 
 
-def test_kpis_accept_mapping_and_preserve_optional_index():
-    idx = pd.date_range("2026-01-01", periods=1, freq="h")
-    flows = calculate_cumulative_grid_flows({"net_balance": (1,), "grid_import": (0,), "grid_export": (1,), "index": idx})
-    assert flows.index is None  # Mapping outputs carry no object-level index attribute.
+def test_cumulative_flows_preserve_the_balance_result_datetime_index():
+    idx = pd.date_range("2026-01-01", periods=3, freq="h")
+    consumption = pd.Series([4.0, 2.0, 5.0], index=idx, name="consumption")
+    production = pd.Series([1.0, 4.0, 3.0], index=idx, name="production")
+    result = calculate_energy_balance(consumption, production)
+    flows = calculate_cumulative_grid_flows(result)
+    assert flows.index.equals(idx)
+    assert len(flows.cumulative_grid_export) == len(idx)
+    assert len(flows.cumulative_grid_import) == len(idx)
+    assert flows.cumulative_grid_export == (0.0, 2.0, 2.0)
+    assert flows.cumulative_grid_import == (3.0, 3.0, 5.0)
+
+
+def test_kpis_accept_mapping_result():
+    result = {"net_balance": (1.0, -1.0), "grid_import": (0.0, 1.0), "grid_export": (1.0, 0.0)}
+    kpis = calculate_energy_balance_kpis(result)
+    assert (kpis.total_grid_export, kpis.total_grid_import, kpis.total_net_balance) == (1.0, 1.0, 0.0)

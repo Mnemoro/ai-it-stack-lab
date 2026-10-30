@@ -14,6 +14,7 @@ from features.scaling import fit_target_scaler, transform_target
 from forecasting.predictor import predict_single_target
 from forecasting.trainer import TrainingConfig, train_seq2seq_model
 from forecasting.lstm_model import build_seq2seq_lstm_model
+from energy_balance.balance_calculator import calculate_energy_balance
 
 
 class FakeModel:
@@ -120,3 +121,30 @@ def test_seq2seq_factory_builds_two_input_single_target_model():
     assert model.loss == "mse"
     with pytest.raises(ValueError):
         build_seq2seq_lstm_model(n_features_enc=0, n_features_dec=2)
+
+
+def test_prediction_integrates_with_energy_balance_without_manual_adaptation():
+    history_idx = pd.date_range("2026-03-01", periods=3, freq="h")
+    future_idx = pd.date_range("2026-03-01 03:00", periods=2, freq="h")
+    scaler = fit_target_scaler(pd.Series([10.0, 20.0, 30.0], name="energy"))
+    scaled_predictions = transform_target(
+        pd.Series([20.0, 40.0], name="energy"), scaler
+    ).to_numpy().reshape(1, 2, 1)
+    consumption = predict_single_target(
+        FakeModel(scaled_predictions),
+        features_past=pd.DataFrame({"load": [0.0, 1.0, 2.0]}, index=history_idx),
+        features_future=pd.DataFrame({"weather": [1.0, 2.0]}, index=future_idx),
+        target_scaler=scaler,
+        future_index=future_idx,
+        lookback=2,
+        future_window=2,
+        prediction_name="consumption",
+    )
+    production = pd.Series([15.0, 50.0], index=future_idx, name="production")
+    balance = calculate_energy_balance(consumption, production)
+    assert balance.index.equals(future_idx)
+    assert balance.consumption == (20.0, 40.0)
+    assert balance.production == (15.0, 50.0)
+    assert balance.net_balance == (-5.0, 10.0)
+    assert balance.grid_import == (5.0, 0.0)
+    assert balance.grid_export == (0.0, 10.0)
